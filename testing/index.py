@@ -10,7 +10,7 @@ import os, subprocess, sys
 os.chdir(os.path.dirname(os.path.abspath(__file__)))
 
 # 1. Install
-INSTALL = ['pip install -q -U vllm datasets huggingface_hub bitsandbytes pyyaml', 'pip uninstall -y -q torchaudio', 'pip install -q uv', 'uv venv ds1000-env --python 3.10 -q', 'uv pip install -q --python ds1000-env/bin/python numpy==1.26.4 pandas==1.5.3 scipy==1.12.0 scikit-learn==1.4.0 matplotlib==3.8.4 seaborn==0.13.2 statsmodels==0.14.1 xgboost==2.0.3 gensim==4.3.2 pyyaml tensorflow-cpu==2.16.1', 'uv pip install -q --python ds1000-env/bin/python torch==2.2.0 --index-url https://download.pytorch.org/whl/cpu', 'curl -sfL https://raw.githubusercontent.com/xlang-ai/DS-1000/b39aab71da6d23ef8d3cac59a7c5f834516ab334/execution.py -o execution.py']
+INSTALL = ['pip install -q -U vllm datasets huggingface_hub bitsandbytes pyyaml', 'pip uninstall -y -q torchaudio', 'pip install -q uv', 'uv venv ds1000-env --python 3.10 -q --allow-existing', 'uv pip install -q --python ds1000-env/bin/python numpy==1.26.4 pandas==1.5.3 scipy==1.12.0 scikit-learn==1.4.0 matplotlib==3.8.4 seaborn==0.13.2 statsmodels==0.14.1 xgboost==2.0.3 gensim==4.3.2 pyyaml tensorflow-cpu==2.16.1', 'uv pip install -q --python ds1000-env/bin/python torch==2.2.0 --index-url https://download.pytorch.org/whl/cpu', 'curl -sfL https://raw.githubusercontent.com/xlang-ai/DS-1000/b39aab71da6d23ef8d3cac59a7c5f834516ab334/execution.py -o execution.py']
 for cmd in INSTALL:
     cmd = f"{sys.executable} -m {cmd}" if cmd.startswith("pip ") else cmd
     subprocess.run(cmd, shell=True, check=True)

@@ -26,7 +26,7 @@ INSTALL = [
     # imports it. Audio is not used, so remove it.
     "pip uninstall -y -q torchaudio",
     "pip install -q uv",
-    "uv venv ds1000-env --python 3.10 -q",
+    "uv venv ds1000-env --python 3.10 -q --allow-existing",   # rerunnable: keeps an existing env
     "uv pip install -q --python ds1000-env/bin/python numpy==1.26.4 pandas==1.5.3 scipy==1.12.0 scikit-learn==1.4.0 "
     "matplotlib==3.8.4 seaborn==0.13.2 statsmodels==0.14.1 xgboost==2.0.3 gensim==4.3.2 pyyaml tensorflow-cpu==2.16.1",
     "uv pip install -q --python ds1000-env/bin/python torch==2.2.0 --index-url https://download.pytorch.org/whl/cpu",
