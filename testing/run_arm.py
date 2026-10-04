@@ -4,6 +4,7 @@ Called by index.ipynb, one process per arm so GPU memory is fully released betwe
 
     python run_arm.py config.yml generate lora
     python run_arm.py config.yml refine lora 43
+    python run_arm.py config.yml refine-sonar lora 43   # + SonarQube issues in the feedback (needs SonarQube)
     python run_arm.py config.yml retest vanilla    # re-extract code + rerun DS-1000 tests, no generation
 
 Exit code 0 = all runs of this arm are on the Hub; 1 = failed (traceback uploaded to OUTPUT_REPO/errors/).
@@ -230,9 +231,14 @@ def retest(data, cfg, api, kind, seed):
           f"{previous['ds1000_pass@10']:.4f} -> {ds_summary['pass@10']:.4f}", flush=True)
 
 
-def refine(engine, data, cfg, api, method, seed):
+def refine(engine, data, cfg, api, method, seed, structural=False):
+    """Refinement with execution feedback. structural=True adds the SonarQube issues of the failing code to the
+    feedback (stop rule unchanged: a problem leaves the loop once its tests pass) and records SonarQube measures and
+    issues of every answer."""
     ref, gen = cfg["refinement-loop"], cfg["generation"]
-    name = run_name(cfg, f"refinement-{method}", seed)
+    name = run_name(cfg, f"{'refinement-sonar' if structural else 'refinement'}-{method}", seed)
+    if structural:
+        import sonar
     out = Path("results") / name
     out.mkdir(parents=True, exist_ok=True)
     request = engine.lora(seed)
@@ -247,14 +253,18 @@ def refine(engine, data, cfg, api, method, seed):
         answers = [{"problem_id": pid, "sample": 0, "completion": o.outputs[0].text,
                     "code": evalkit.ds1000_code(o.outputs[0].text)} for pid, o in zip(open_ids, outputs)]
         results = {r["problem_id"]: r for r in run_ds1000_tests(answers, f"refine_{method}_it{iteration}")}
+        scans = sonar.scan({a["problem_id"]: a["code"] for a in answers}) if structural else {}
         still_open = []
         for answer in answers:
             pid, result = answer["problem_id"], results[answer["problem_id"]]
             rows.append({"problem_id": pid, "iteration": iteration, "passed": result["passed"],
-                         "result": result["result"], "completion": answer["completion"], "code": answer["code"]})
+                         "result": result["result"], "completion": answer["completion"], "code": answer["code"],
+                         **({"sonar": scans[pid]} if structural else {})})
             if not result["passed"]:
-                histories[pid] = evalkit.refine_messages(histories[pid], answer["completion"],
-                                                         evalkit.describe_error(result["result"]))
+                feedback = evalkit.describe_error(result["result"])
+                if structural:
+                    feedback = evalkit.structural_feedback(feedback, scans[pid]["issues"])
+                histories[pid] = evalkit.refine_messages(histories[pid], answer["completion"], feedback)
                 still_open.append(pid)
         print(f"iteration {iteration}: solved {len(subset) - len(still_open)}/{len(subset)}", flush=True)
         open_ids = still_open
@@ -272,8 +282,9 @@ def refine(engine, data, cfg, api, method, seed):
         "run": name, "method": method, "seed": seed, "adapter_repo": ARMS[method]["adapter"],
         "quantized_4bit": ARMS[method]["quant"], "problems": len(subset), "problem_ids": subset,
         "max_iterations": ref["max_iterations"], "pass_rate_by_iteration": cumulative, "decoding": "greedy",
-        "code_extraction": EXTRACTION,
-        "gpu": engine.gpu, "versions": engine.versions, "minutes": round((time.time() - started) / 60, 1),
+        "code_extraction": EXTRACTION, "structural_feedback": structural,
+        "gpu": engine.gpu, "versions": {**engine.versions, **({"sonarqube": sonar.version()} if structural else {})},
+        "minutes": round((time.time() - started) / 60, 1),
     }
     with open(out / "summary.json", "w") as handle:
         json.dump(summary, handle, indent=2)
@@ -288,7 +299,8 @@ def main(argv):
     from huggingface_hub import HfApi
 
     api = HfApi()
-    label = {"generate": kind, "refine": f"refinement-{kind}", "retest": f"retest-{kind}"}[mode]
+    label = {"generate": kind, "refine": f"refinement-{kind}", "refine-sonar": f"refinement-sonar-{kind}",
+             "retest": f"retest-{kind}"}[mode]
     try:
         if mode == "retest":
             data = load_data(cfg)
@@ -303,8 +315,8 @@ def main(argv):
                 return 0
         else:
             seed = int(argv[3])
-            if f"{run_name(cfg, f'refinement-{kind}', seed)}/summary.json" in on_hub:
-                print(f"{run_name(cfg, f'refinement-{kind}', seed)}: already on the Hub, skipping", flush=True)
+            if f"{run_name(cfg, label, seed)}/summary.json" in on_hub:
+                print(f"{run_name(cfg, label, seed)}: already on the Hub, skipping", flush=True)
                 return 0
         data = load_data(cfg)
         engine = Engine(ARMS[kind], cfg["generation"])
@@ -312,7 +324,7 @@ def main(argv):
             for seed in todo:
                 evaluate(engine, data, cfg, api, kind, seed)
         else:
-            refine(engine, data, cfg, api, kind, seed)
+            refine(engine, data, cfg, api, kind, seed, structural=mode == "refine-sonar")
         return 0
     except Exception:
         error = traceback.format_exc()

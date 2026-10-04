@@ -302,6 +302,128 @@ SINGLE = {
 }
 
 
+# ---------------------------------------------------------------------------------------------------------------------
+# iterative-refinement-loop/index.ipynb: refinement with execution + SonarQube feedback, SonarQube installed on the GPU
+# machine itself (same versions as the rating service: SonarQube Community Build 26.6.0.123539, sonar-scanner 6.2.1.4610,
+# Java 21).
+SONARQUBE_VERSION = "26.6.0.123539"
+SCANNER_VERSION = "6.2.1.4610"
+
+MD_SONAR_INTRO = """
+# Iterative refinement loop with SonarQube feedback
+
+Arm 5, exploratory part of RQ4: the same loop as `refinement-<method>` (200 DS-1000 problems, at most 3 iterations,
+greedy, the median seed of the method), but the feedback for a failing answer is the execution error **plus the
+SonarQube issues of that answer**. A problem leaves the loop once its tests pass, as in the execution-only loop, so both
+loops are compared on the same problems. SonarQube measures and issues of every answer are stored too.
+
+Results: `refinement-sonar-<method>/seed-<seed>/` (`refinement_results.jsonl`, `summary.json`) in `output_repo`.
+
+**Machine:** template PyTorch, GPU 24 GB, disk 60 GB, RAM >= 16 GB (vLLM + SonarQube). SonarQube runs on this machine;
+nothing has to run on the laptop. **Credentials:** `HF_TOKEN` (write) and `VAST_API_KEY`, as environment variables or in
+the config below. Then **Run All**; the machine stops itself at the end.
+"""
+
+MD_SONAR_INSTALL = """
+## 1b. Install SonarQube on this machine
+Java 21 (Temurin), SonarQube server and sonar-scanner CLI into `/opt`. SonarQube refuses to run as root, so it runs as
+user `sonar`. Elasticsearch bootstrap checks are disabled because a container cannot raise `vm.max_map_count`.
+"""
+
+SONAR_INSTALL = f"""
+%%bash
+set -e
+cd /opt
+command -v unzip >/dev/null || (apt-get update -qq && apt-get install -y -qq unzip >/dev/null)
+if [ ! -x jre/bin/java ]; then
+  mkdir -p jre
+  curl -sfL "https://api.adoptium.net/v3/binary/latest/21/ga/linux/x64/jre/hotspot/normal/eclipse" | tar -xz -C jre --strip-components=1
+fi
+if [ ! -d sonarqube ]; then
+  curl -sfLo sq.zip https://binaries.sonarsource.com/Distribution/sonarqube/sonarqube-{SONARQUBE_VERSION}.zip
+  unzip -q sq.zip && mv sonarqube-{SONARQUBE_VERSION} sonarqube && rm sq.zip
+  echo "sonar.es.bootstrap.checks.disable=true" >> sonarqube/conf/sonar.properties
+fi
+if [ ! -d sonar-scanner ]; then
+  curl -sfLo sc.zip https://binaries.sonarsource.com/Distribution/sonar-scanner-cli/sonar-scanner-cli-{SCANNER_VERSION}.zip
+  unzip -q sc.zip && mv sonar-scanner-{SCANNER_VERSION} sonar-scanner && rm sc.zip
+fi
+id sonar >/dev/null 2>&1 || useradd -r -m -s /bin/bash sonar
+chown -R sonar /opt/sonarqube
+jre/bin/java -version 2>&1 | head -1
+echo "SonarQube {SONARQUBE_VERSION} and sonar-scanner {SCANNER_VERSION} installed"
+"""
+
+MD_SONAR_START = """
+## 3b. Start SonarQube and create a token
+Starts the server, waits until it is UP (a few minutes on first start), sets a random admin password (kept in
+`/opt/sonar_admin.txt` so a rerun reuses it) and exports a fresh user token as `SONAR_TOKEN` for the refinement runs.
+"""
+
+SONAR_START = """
+import secrets
+import time
+
+import httpx
+
+os.environ.update(JAVA_HOME="/opt/jre", SONAR_HOST_URL="http://localhost:9000",
+                  SONAR_SCANNER="/opt/sonar-scanner/bin/sonar-scanner")
+subprocess.run(["su", "sonar", "-s", "/bin/bash", "-c",
+                "SONAR_JAVA_PATH=/opt/jre/bin/java /opt/sonarqube/bin/linux-x86-64/sonar.sh start"], check=True)
+deadline = time.time() + 900
+while True:
+    try:
+        status = httpx.get("http://localhost:9000/api/system/status", timeout=10).json()["status"]
+    except Exception:
+        status = "starting"
+    if status == "UP":
+        break
+    if time.time() > deadline:
+        subprocess.run("tail -n 40 /opt/sonarqube/logs/*.log", shell=True)
+        raise SystemExit("SonarQube did not start within 15 minutes (logs above)")
+    time.sleep(10)
+print("SonarQube UP")
+
+password_file = "/opt/sonar_admin.txt"
+if not os.path.exists(password_file):
+    password = "Sq-" + secrets.token_hex(8) + "-A1!"
+    httpx.post("http://localhost:9000/api/users/change_password", auth=("admin", "admin"),
+               data={"login": "admin", "previousPassword": "admin", "password": password}).raise_for_status()
+    with open(password_file, "w") as handle:
+        handle.write(password)
+password = open(password_file).read().strip()
+response = httpx.post("http://localhost:9000/api/user_tokens/generate", auth=("admin", password),
+                      data={"name": f"refine-{int(time.time())}", "type": "USER_TOKEN"})
+response.raise_for_status()
+os.environ["SONAR_TOKEN"] = response.json()["token"]   # inherited by run_arm.py
+print("SonarQube", httpx.get("http://localhost:9000/api/server/version").text, "| token ready")
+"""
+
+MD_SONAR_RUN = """
+## 4. Refinement with SonarQube feedback
+`seed: auto` picks the median seed of the method by DS-1000 pass@1 (the same seed as `refinement-<method>`).
+"""
+
+SONAR_RUN = REFINE.replace('"config.yml", "refine", method', '"config.yml", "refine-sonar", method').replace(
+    "refinement-{method}", "refinement-sonar-{method}")
+
+
+def sonar_notebook():
+    helpers = {**HELPERS, "sonar.py": (HERE / "sonar.py").read_text()}
+    install = "%" + INSTALL[0] + "\n" + "\n".join("!" + cmd for cmd in INSTALL[1:]) + ' && echo "execution.py ok"'
+    return notebook([
+        md(MD_SONAR_INTRO), md("## 0. Configuration (edit here)"),
+        code("%%writefile config.yml\n" + config_for(set(), {"lora", "qlora"})),
+        md(MD_INSTALL), code(install),
+        md(MD_SONAR_INSTALL), code(SONAR_INSTALL),
+        md(MD_HELPERS), *[code(f"%%writefile {name}\n" + text) for name, text in helpers.items()],
+        md(MD_SETUP), code(SETUP),
+        md(MD_SONAR_START), code(SONAR_START),
+        md(MD_SONAR_RUN), code(SONAR_RUN),
+        md(MD_SHUTDOWN), code(SHUTDOWN),
+    ])
+
+
 def main():
     (HERE / "index.ipynb").write_text(json.dumps(notebook([md(MD_INTRO), *shared_cells()]), indent=1))
     (HERE / "index.py").write_text(index_script())
@@ -319,6 +441,10 @@ def main():
         path.write_text(json.dumps(single_notebook(f"refinement-loop {method}", description,
                                                    config_for(set(), {method})), indent=1))
         print("wrote", path.relative_to(HERE))
+    path = HERE.parent / "iterative-refinement-loop" / "index.ipynb"
+    path.parent.mkdir(exist_ok=True)
+    path.write_text(json.dumps(sonar_notebook(), indent=1))
+    print("wrote", path.relative_to(HERE.parent))
 
 
 if __name__ == "__main__":

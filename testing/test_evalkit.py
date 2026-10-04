@@ -10,6 +10,7 @@ from evalkit import (
     postprocess_ds1000,
     refine_messages,
     select_fewshot,
+    structural_feedback,
     summarize_ds1000,
 )
 
@@ -115,3 +116,13 @@ def test_describe_error_turns_empty_assertions_into_feedback():
 
 def test_pass_at_k_is_zero_when_nothing_passed_even_with_few_samples():
     assert pass_at_k(3, 0, 10) == 0.0
+
+
+def test_structural_feedback_appends_sonarqube_issues():
+    issues = [{"line": 3, "message": "Remove this unused variable.", "rule": "python:S1481"},
+              {"line": None, "message": "Add a docstring.", "rule": "python:S1720"}]
+    text = structural_feedback("name 'np' is not defined", issues)
+    assert text.startswith("name 'np' is not defined\n\nSonarQube issues in this code:\n")
+    assert "- line 3: Remove this unused variable. (python:S1481)" in text
+    assert "- Add a docstring. (python:S1720)" in text
+    assert "no structural issues" in structural_feedback("timed out", [])

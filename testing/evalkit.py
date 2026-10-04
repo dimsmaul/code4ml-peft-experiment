@@ -110,6 +110,15 @@ def describe_error(result: str) -> str:
     return message or "The code ran but produced a wrong result (a test assertion failed)."
 
 
+def structural_feedback(error: str, issues: list[dict]) -> str:
+    """Execution error plus the SonarQube issues of the same code (refinement with structural feedback)."""
+    if not issues:
+        return f"{error}\n\nSonarQube found no structural issues in this code."
+    lines = "\n".join(f"- line {i['line']}: {i['message']} ({i['rule']})" if i.get("line")
+                      else f"- {i['message']} ({i['rule']})" for i in issues)
+    return f"{error}\n\nSonarQube issues in this code:\n{lines}"
+
+
 def refine_messages(history: list[dict], previous_code: str, error: str) -> list[dict]:
     return history + [{"role": "assistant", "content": previous_code},
                       {"role": "user", "content": REFINE_INSTRUCTION.format(error=error)}]
