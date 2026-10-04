@@ -4,7 +4,7 @@ Called by index.ipynb, one process per arm so GPU memory is fully released betwe
 
     python run_arm.py config.yml generate lora
     python run_arm.py config.yml refine lora 43
-    python run_arm.py config.yml retest vanilla    # DS-1000 tests only, on the generations already on the Hub
+    python run_arm.py config.yml retest vanilla    # re-extract code + rerun DS-1000 tests, no generation
 
 Exit code 0 = all runs of this arm are on the Hub; 1 = failed (traceback uploaded to OUTPUT_REPO/errors/).
 """
@@ -22,6 +22,7 @@ import yaml
 
 import evalkit
 
+EXTRACTION = "python_block"   # how code is taken from a reply (evalkit.python_block); retest skips runs that match
 BASE_7B = "Qwen/Qwen2.5-Coder-7B-Instruct"
 BASE_14B = "Qwen/Qwen2.5-Coder-14B-Instruct"
 ARMS = {
@@ -143,7 +144,7 @@ def evaluate(engine, data, cfg, api, kind, seed):
     prompts = [engine.prompt(evalkit.ds1000_messages(problems[pid]["prompt"], ds_shots)) for pid in eval_ids]
     outputs = engine.generate(prompts, request, n=gen["ds1000_samples"], temperature=gen["ds1000_temperature"],
                               top_p=gen["ds1000_top_p"], max_tokens=gen["max_new_tokens"], seed=gen["seed"])
-    generations = [{"problem_id": pid, "sample": i, "completion": o.text, "code": evalkit.postprocess_ds1000(o.text)}
+    generations = [{"problem_id": pid, "sample": i, "completion": o.text, "code": evalkit.ds1000_code(o.text)}
                    for pid, output in zip(eval_ids, outputs) for i, o in enumerate(output.outputs)]
     write_jsonl(out / "ds1000_generations.jsonl", generations)
     generation_minutes = round((time.time() - started) / 60, 1)
@@ -159,7 +160,7 @@ def evaluate(engine, data, cfg, api, kind, seed):
         "run": name, "base_model": arm["base"], "adapter_repo": arm["adapter"], "seed": seed,
         "quantized_4bit": arm["quant"], "fewshot": arm["fewshot"], "fewshot_ds1000_ids": data["fewshot_ids"],
         "gpu": engine.gpu, "versions": engine.versions, "pilot_problems": cfg.get("pilot_problems"),
-        "generation": {**gen, "code4ml": "greedy"},
+        "generation": {**gen, "code4ml": "greedy"}, "code_extraction": EXTRACTION,
         "code4ml": {"answers": len(code4ml_rows), "ast_valid": valid, "ast_valid_rate": valid / len(code4ml_rows)},
         "ds1000": ds_summary,
         "generation_minutes": generation_minutes,
@@ -174,24 +175,35 @@ def evaluate(engine, data, cfg, api, kind, seed):
 
 
 def retest(data, cfg, api, kind, seed):
-    """Rerun the DS-1000 tests of a finished run on its uploaded generations (no generation, no GPU).
+    """Re-extract the code from the uploaded completions and rerun the DS-1000 tests (no generation, no GPU).
 
-    Replaces ds1000_results.jsonl, ds1000_per_problem.json and the ds1000 part of summary.json; the Code4ML outputs and
-    the generations stay as they are. The previous scores are kept in summary.json under "retested"."""
+    For runs generated before evalkit.python_block: replaces the code / ast_valid fields of code4ml_outputs.jsonl and
+    ds1000_generations.jsonl (completions stay as they are), the DS-1000 results and summary.json. The previous scores
+    are kept in summary.json under "retested". Runs that already use python_block are skipped."""
     from huggingface_hub import hf_hub_download
 
     name = run_name(cfg, kind, seed)
     fetch = lambda file: hf_hub_download(cfg["output_repo"], f"{name}/{file}", repo_type="dataset")
     with open(fetch("summary.json")) as handle:
         summary = json.load(handle)
-    if "retested" in summary:
-        print(f"{name}: already retested, skipping", flush=True)
+    if summary.get("code_extraction") == EXTRACTION:
+        print(f"{name}: already uses {EXTRACTION}, skipping", flush=True)
         return
+    with open(fetch("code4ml_outputs.jsonl")) as handle:
+        code4ml_rows = [json.loads(line) for line in handle]
     with open(fetch("ds1000_generations.jsonl")) as handle:
         generations = [json.loads(line) for line in handle]
     out = Path("results") / name
     out.mkdir(parents=True, exist_ok=True)
     started = time.time()
+
+    for row in code4ml_rows:
+        row["code"] = evalkit.extract_code(row["completion"])
+        row["ast_valid"] = evalkit.ast_valid(row["code"])
+    write_jsonl(out / "code4ml_outputs.jsonl", code4ml_rows)
+    for row in generations:
+        row["code"] = evalkit.ds1000_code(row["completion"])
+    write_jsonl(out / "ds1000_generations.jsonl", generations)
 
     results = run_ds1000_tests(generations, name.replace("/", "_"))
     write_jsonl(out / "ds1000_results.jsonl", results)
@@ -199,17 +211,21 @@ def retest(data, cfg, api, kind, seed):
     with open(out / "ds1000_per_problem.json", "w") as handle:
         json.dump(ds_summary.pop("per_problem"), handle)
 
-    previous = summary["ds1000"]
+    valid = sum(r["ast_valid"] for r in code4ml_rows)
+    previous = {"ds1000_pass@1": summary["ds1000"]["pass@1"], "ds1000_pass@10": summary["ds1000"]["pass@10"],
+                "code4ml_ast_valid": summary["code4ml"]["ast_valid"]}
+    summary["code4ml"] = {"answers": len(code4ml_rows), "ast_valid": valid, "ast_valid_rate": valid / len(code4ml_rows)}
     summary["ds1000"] = ds_summary
+    summary["code_extraction"] = EXTRACTION
     summary["retested"] = {"at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
-                           "minutes": round((time.time() - started) / 60, 1),
-                           "previous_pass@1": previous["pass@1"], "previous_pass@10": previous["pass@10"]}
+                           "minutes": round((time.time() - started) / 60, 1), "previous": previous}
     with open(out / "summary.json", "w") as handle:
         json.dump(summary, handle, indent=2)
     api.upload_folder(repo_id=cfg["output_repo"], repo_type="dataset", folder_path=str(out),
                       path_in_repo=name, commit_message=f"retest {name}")
-    print(f"{name}: DS-1000 pass@1 {previous['pass@1']:.4f} -> {ds_summary['pass@1']:.4f} | "
-          f"pass@10 {previous['pass@10']:.4f} -> {ds_summary['pass@10']:.4f}", flush=True)
+    print(f"{name}: AST valid {previous['code4ml_ast_valid']} -> {valid}/{len(code4ml_rows)} | DS-1000 pass@1 "
+          f"{previous['ds1000_pass@1']:.4f} -> {ds_summary['pass@1']:.4f} | pass@10 "
+          f"{previous['ds1000_pass@10']:.4f} -> {ds_summary['pass@10']:.4f}", flush=True)
 
 
 def refine(engine, data, cfg, api, method, seed):
@@ -227,7 +243,7 @@ def refine(engine, data, cfg, api, method, seed):
         outputs = engine.generate([engine.prompt(histories[pid]) for pid in open_ids], request,
                                   temperature=0.0, max_tokens=gen["max_new_tokens"])
         answers = [{"problem_id": pid, "sample": 0, "completion": o.outputs[0].text,
-                    "code": evalkit.postprocess_ds1000(o.outputs[0].text)} for pid, o in zip(open_ids, outputs)]
+                    "code": evalkit.ds1000_code(o.outputs[0].text)} for pid, o in zip(open_ids, outputs)]
         results = {r["problem_id"]: r for r in run_ds1000_tests(answers, f"refine_{method}_it{iteration}")}
         still_open = []
         for answer in answers:
@@ -254,6 +270,7 @@ def refine(engine, data, cfg, api, method, seed):
         "run": name, "method": method, "seed": seed, "adapter_repo": ARMS[method]["adapter"],
         "quantized_4bit": ARMS[method]["quant"], "problems": len(subset), "problem_ids": subset,
         "max_iterations": ref["max_iterations"], "pass_rate_by_iteration": cumulative, "decoding": "greedy",
+        "code_extraction": EXTRACTION,
         "gpu": engine.gpu, "versions": engine.versions, "minutes": round((time.time() - started) / 60, 1),
     }
     with open(out / "summary.json", "w") as handle:

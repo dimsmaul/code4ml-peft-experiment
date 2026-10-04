@@ -78,10 +78,10 @@ arm uploads its traceback to `errors/` and the next arm still runs.
 """
 
 MD_RETEST = """
-## 4b. Retest DS-1000 (optional)
-Arms enabled under `retest:` rerun only their DS-1000 tests on the generations already on the Hub, and replace
-`ds1000_results.jsonl`, `ds1000_per_problem.json` and the `ds1000` part of `summary.json` (old scores kept under
-`retested`). No GPU needed.
+## 4b. Retest (optional)
+Arms enabled under `retest:` take the code again from the replies already on the Hub (first python block, see
+`evalkit.python_block`), recompute AST validity and rerun the DS-1000 tests; no generation, no GPU. Old scores are kept
+in `summary.json` under `retested`. Runs generated with the current extraction are skipped.
 """
 
 MD_REFINE = """

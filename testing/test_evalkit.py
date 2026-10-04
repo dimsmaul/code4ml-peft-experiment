@@ -1,6 +1,7 @@
 from evalkit import (
     ast_valid,
     code4ml_messages,
+    ds1000_code,
     ds1000_messages,
     ds1000_program,
     extract_code,
@@ -78,6 +79,31 @@ def test_extract_code_and_ast_gate():
     assert extract_code("plain = 1") == "plain = 1"
     assert ast_valid("x = 1")
     assert not ast_valid("x = (")
+
+
+def test_python_block_skips_shell_blocks_and_open_fences():
+    # Real failure: install line in ```sh first, the prose between blocks was taken as code.
+    reply = "Install:\n```sh\npip install pandas\n```\nThen load it:\n```python\nimport pandas as pd\n```\nDone."
+    assert extract_code(reply) == "import pandas as pd"
+    # Answer cut at max_new_tokens: the block is never closed.
+    assert extract_code("Here you go:\n```python\ndf = pd.read_csv('a.csv')\n") == "df = pd.read_csv('a.csv')"
+    # Untagged block counts as python; no block at all keeps the whole reply.
+    assert extract_code("x:\n```\ny = 2\n```") == "y = 2"
+    assert extract_code("Sure, which task?") == "Sure, which task?"
+
+
+def test_ds1000_code_drops_prose_around_the_block():
+    # Real vanilla reply shape: prose, then the fenced answer, then explanation.
+    reply = ("To shuffle the rows, use `.iloc`. Here's how you can do it:\n\n```python\n"
+             "result = df.iloc[List]\n```\n\nThis reorders the rows.")
+    assert ds1000_code(reply) == "result = df.iloc[List]\n"
+    # Bare completions (few-shot style) still go through the official post-processing unchanged.
+    assert ds1000_code("result = df.mean()\n</code>\nEND SOLUTION") == postprocess_ds1000("result = df.mean()\n</code>")
+    # Few-shot style: bare code, a stray closing fence, then prose. The official cut is valid, so it wins.
+    assert ds1000_code("result = df.mean()\n```\n\nThis code takes the mean.") == "result = df.mean()\n"
+    assert extract_code("x = 1\n```\nThis sets x.") == "x = 1"
+    # Indented function body with return (DS-1000 function problems) counts as valid, not replaced.
+    assert ds1000_code("    result = df.copy()\n    return result\n```\nExplanation") == "    result = df.copy()\n    return result\n"
 
 
 def test_describe_error_turns_empty_assertions_into_feedback():

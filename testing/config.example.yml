@@ -15,8 +15,8 @@ refinement-loop:
   problems: 200        # proposal: 100-200 DS-1000 problems
   max_iterations: 3    # proposal: at most 3
 
-retest:                # DS-1000 tests only, on the generations already on the Hub (no generation, CPU only)
-  vanilla: false       # replaces ds1000_results / ds1000_per_problem / ds1000 part of summary.json
+retest:                # re-extract code from the replies on the Hub + rerun DS-1000 tests (no generation, CPU only)
+  vanilla: false       # for runs made before the python_block fix; newer runs are skipped
   few-shot: false
   lora: false
   qlora: false

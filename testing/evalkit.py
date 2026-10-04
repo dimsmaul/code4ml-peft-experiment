@@ -8,6 +8,7 @@ from __future__ import annotations
 import ast
 import random
 import re
+import textwrap
 from collections import defaultdict
 from math import comb
 
@@ -114,13 +115,43 @@ def refine_messages(history: list[dict], previous_code: str, error: str) -> list
                       {"role": "user", "content": REFINE_INSTRUCTION.format(error=error)}]
 
 
-_FENCE = re.compile(r"```(?:python|py)?\s*\n(.*?)```", re.DOTALL)
+# Opening fence with any language tag; a block left open (answer cut at max_new_tokens) runs to the end.
+_BLOCK = re.compile(r"```([\w+-]*)[ \t]*\n(.*?)(?:```|\Z)", re.DOTALL)
+_PYTHON_TAGS = ("python", "py", "python3", "")
+
+
+def python_block(completion: str) -> str | None:
+    """First fenced block tagged python (or untagged); None if there is none. Skips ```sh / ```bash install lines."""
+    for tag, body in _BLOCK.findall(completion):
+        if tag.lower() in _PYTHON_TAGS:
+            return body
+    return None
+
+
+def _parses_as_body(code: str) -> bool:
+    """Non-empty and valid as a function body (DS-1000 answers may be an indented body that uses return)."""
+    body = textwrap.indent(textwrap.dedent(code), "    ")
+    return bool(code.strip()) and ast_valid(f"def _():\n{body}\n    pass")
 
 
 def extract_code(completion: str) -> str:
-    """Code4ML track: take the first fenced block if the model used one, else the whole reply."""
-    match = _FENCE.search(completion)
-    return (match.group(1) if match else completion).strip()
+    """Code4ML track. A bare code reply (maybe followed by a stray ``` and prose) is kept up to the first fence;
+    otherwise the first python block; otherwise the whole reply (then fails the AST gate)."""
+    before = completion.split("```")[0].strip()
+    if before and ast_valid(before):
+        return before
+    block = python_block(completion)
+    return (completion if block is None else block).strip()
+
+
+def ds1000_code(completion: str) -> str:
+    """DS-1000 track. The official post-processing first; it assumes a bare completion, so when instruct-model prose
+    makes its result invalid, post-process the first python block instead."""
+    official = postprocess_ds1000(completion)
+    if _parses_as_body(official):
+        return official
+    block = python_block(completion)
+    return official if block is None else postprocess_ds1000(block)
 
 
 def ast_valid(code: str) -> bool:
