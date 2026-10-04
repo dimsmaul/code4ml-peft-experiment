@@ -30,8 +30,10 @@ ARMS = {
     "few-shot": dict(base=BASE_7B, adapter=None, seeds=[None], quant=False, fewshot=True),
     "lora": dict(base=BASE_7B, adapter="dimsmauls/qwen2.5-coder-7b-code4ml-lora", seeds=[42, 43, 44],
                  quant=False, fewshot=False),
+    # Trained on a 4-bit NF4 base; evaluated on the bf16 base like LoRA, since vLLM >= 0.30 dropped bitsandbytes and
+    # every arm must run on the same engine.
     "qlora": dict(base=BASE_7B, adapter="dimsmauls/qwen2.5-coder-7b-code4ml-qlora", seeds=[42, 43, 44],
-                  quant=True, fewshot=False),
+                  quant=False, fewshot=False),
     "qwen-14b": dict(base=BASE_14B, adapter=None, seeds=[None], quant=False, fewshot=False),
 }
 

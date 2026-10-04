@@ -5,7 +5,7 @@ arms:
   vanilla: true        # Qwen2.5-Coder-7B-Instruct, no fine-tuning
   few-shot: true       # vanilla + 3 examples in the prompt
   lora: true           # 3 adapters (seed 42, 43, 44)
-  qlora: true          # 3 adapters on a 4-bit base; enable after QLoRA training finished
+  qlora: true          # 3 adapters (trained 4-bit, evaluated on bf16 base); enable after QLoRA training finished
   qwen-14b: false       # Qwen2.5-Coder-14B-Instruct, needs a GPU with >= 40 GB
 
 refinement-loop:

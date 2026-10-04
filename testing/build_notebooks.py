@@ -297,7 +297,7 @@ SINGLE = {
     "vanilla": ("vanilla", "Qwen2.5-Coder-7B-Instruct without fine-tuning. GPU: 24 GB, disk 60 GB."),
     "few-shot": ("few-shot", "Vanilla with 3 training examples in the prompt. GPU: 24 GB, disk 60 GB."),
     "lora": ("lora", "LoRA adapters, seeds 42, 43, 44. GPU: 24 GB, disk 60 GB."),
-    "qlora": ("qlora", "QLoRA adapters on the 4-bit base, seeds 42, 43, 44. GPU: 24 GB, disk 60 GB."),
+    "qlora": ("qlora", "QLoRA adapters (trained on a 4-bit base, evaluated on the bf16 base), seeds 42, 43, 44. GPU: 24 GB, disk 60 GB."),
     "qwen-14b": ("qwen-14b", "Qwen2.5-Coder-14B-Instruct without fine-tuning. GPU: >= 40 GB, disk 90 GB."),
 }
 
