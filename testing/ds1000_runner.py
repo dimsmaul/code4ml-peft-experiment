@@ -17,8 +17,34 @@ import os
 # Same settings as the official test_ds1000.py: quiet TensorFlow, tests run on CPU only.
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
 os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
+# One thread per test process. By default TensorFlow and the BLAS libraries start a thread per host core in every
+# test process; with many parallel tests that exceeds the container's thread limit and TensorFlow aborts
+# ("Thread tf_Compute creation via pthread_create() failed"), which would count as a failed test.
+for _var in ("TF_NUM_INTRAOP_THREADS", "TF_NUM_INTEROP_THREADS", "OMP_NUM_THREADS", "MKL_NUM_THREADS",
+             "OPENBLAS_NUM_THREADS", "NUMEXPR_NUM_THREADS"):
+    os.environ[_var] = "1"
 
 import execution  # noqa: E402
+
+
+def allocated_cpus():
+    """CPUs this container may use (cgroup quota), not the host's core count."""
+    try:
+        quota, period = open("/sys/fs/cgroup/cpu.max").read().split()[:2]          # cgroup v2
+        if quota != "max":
+            return max(1, int(int(quota) / int(period)))
+    except (OSError, ValueError):
+        pass
+    try:
+        quota = int(open("/sys/fs/cgroup/cpu/cpu.cfs_quota_us").read())            # cgroup v1
+        period = int(open("/sys/fs/cgroup/cpu/cpu.cfs_period_us").read())
+        if quota > 0:
+            return max(1, quota // period)
+    except (OSError, ValueError):
+        pass
+    if hasattr(os, "sched_getaffinity"):
+        return len(os.sched_getaffinity(0))
+    return os.cpu_count() or 1
 
 
 def build_program(code_context, code):
@@ -63,7 +89,8 @@ if __name__ == "__main__":
     parser.add_argument("problems")
     parser.add_argument("answers")
     parser.add_argument("results")
-    parser.add_argument("--workers", type=int, default=min(16, os.cpu_count() or 1))
+    parser.add_argument("--workers", type=int, default=min(16, allocated_cpus()))
     parser.add_argument("--timeout", type=float, default=120.0)
     args = parser.parse_args()
+    print(f"testing with {args.workers} parallel workers", flush=True)
     run(args.problems, args.answers, args.results, args.workers, args.timeout)
