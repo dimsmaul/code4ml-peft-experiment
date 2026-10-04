@@ -77,6 +77,13 @@ Each arm runs in its own process (fresh GPU memory) and uploads every finished r
 arm uploads its traceback to `errors/` and the next arm still runs.
 """
 
+MD_RETEST = """
+## 4b. Retest DS-1000 (optional)
+Arms enabled under `retest:` rerun only their DS-1000 tests on the generations already on the Hub, and replace
+`ds1000_results.jsonl`, `ds1000_per_problem.json` and the `ds1000` part of `summary.json` (old scores kept under
+`retested`). No GPU needed.
+"""
+
 MD_REFINE = """
 ## 5. Iterative refinement
 `seed: auto` picks the median seed of that method by DS-1000 pass@1 (from its `summary.json` files on the Hub).
@@ -102,15 +109,17 @@ for key, env in (("hf_token", "HF_TOKEN"), ("vast_api_key", "VAST_API_KEY")):
 print("HF_TOKEN set:", bool(os.environ.get("HF_TOKEN")), "| VAST_API_KEY set:", bool(os.environ.get("VAST_API_KEY")))
 arms = [kind for kind, enabled in cfg["arms"].items() if enabled]
 refine_methods = [m for m in ("lora", "qlora") if cfg["refinement-loop"].get(m)]
+retest_arms = [kind for kind, enabled in cfg.get("retest", {}).items() if enabled]
 PREFIX = "pilot/" if cfg.get("pilot_problems") else ""
-print("arms:", arms, "| refinement:", refine_methods, "| pilot:", cfg.get("pilot_problems"))
+print("arms:", arms, "| refinement:", refine_methods, "| retest:", retest_arms, "| pilot:", cfg.get("pilot_problems"))
 
-# nvidia-smi instead of torch, so this process does not hold GPU memory the arms need
-name, total_mb = subprocess.run(["nvidia-smi", "--query-gpu=name,memory.total", "--format=csv,noheader,nounits"],
-                                capture_output=True, text=True, check=True).stdout.strip().split(", ")
-print(f"GPU: {name}, {int(total_mb) / 1024:.0f} GB")
-if "qwen-14b" in arms and int(total_mb) < 40 * 1024:
-    raise SystemExit("qwen-14b needs a GPU with >= 40 GB: disable it in config.yml or rent a bigger GPU")
+if arms or refine_methods:  # retest alone runs on CPU
+    # nvidia-smi instead of torch, so this process does not hold GPU memory the arms need
+    name, total_mb = subprocess.run(["nvidia-smi", "--query-gpu=name,memory.total", "--format=csv,noheader,nounits"],
+                                    capture_output=True, text=True, check=True).stdout.strip().split(", ")
+    print(f"GPU: {name}, {int(total_mb) / 1024:.0f} GB")
+    if "qwen-14b" in arms and int(total_mb) < 40 * 1024:
+        raise SystemExit("qwen-14b needs a GPU with >= 40 GB: disable it in config.yml or rent a bigger GPU")
 
 token = os.environ.get("HF_TOKEN")
 login(token=token) if token else login()
@@ -133,6 +142,13 @@ for kind in arms:
     if stream([sys.executable, "run_arm.py", "config.yml", "generate", kind]) != 0:
         failed.append(kind)
 print("failed arms:", failed)
+"""
+
+RETEST = """
+for kind in retest_arms:
+    print(f"\\n########## retest {kind} ##########", flush=True)
+    if stream([sys.executable, "run_arm.py", "config.yml", "retest", kind]) != 0:
+        failed.append(f"retest-{kind}")
 """
 
 REFINE = """
@@ -208,9 +224,9 @@ def config_for(arms_on, refine_on):
         if line and not line.startswith((" ", "#")):
             section = line.split(":")[0]
         match = re.match(r"^(  )([\w-]+)(:\s*)(true|false)(.*)$", line)
-        if match and section in ("arms", "refinement-loop"):
+        if match and section in ("arms", "refinement-loop", "retest"):
             key = match.group(2)
-            enabled = key in (arms_on if section == "arms" else refine_on)
+            enabled = key in {"arms": arms_on, "refinement-loop": refine_on}.get(section, ())
             line = f"{match.group(1)}{key}{match.group(3)}{'true' if enabled else 'false'}{match.group(5)}"
         lines.append(line)
     return "\n".join(lines) + "\n"
@@ -223,6 +239,7 @@ def shared_cells():
         md(MD_HELPERS), *[code(f"%%writefile {name}\n" + text) for name, text in HELPERS.items()],
         md(MD_SETUP), code(SETUP),
         md(MD_RUN), code(RUN_ARMS),
+        md(MD_RETEST), code(RETEST),
         md(MD_REFINE), code(REFINE),
         md(MD_SHUTDOWN), code(SHUTDOWN),
     ]
@@ -269,6 +286,7 @@ def index_script():
         "",
         "# 3. Config, GPU check, login", SETUP, "",
         "# 4. Arms", RUN_ARMS, "",
+        "# 4b. Retest DS-1000", RETEST, "",
         "# 5. Iterative refinement", REFINE, "",
         "# 6. Shut down", SHUTDOWN,
     ]

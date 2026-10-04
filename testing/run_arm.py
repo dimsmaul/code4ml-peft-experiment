@@ -4,6 +4,7 @@ Called by index.ipynb, one process per arm so GPU memory is fully released betwe
 
     python run_arm.py config.yml generate lora
     python run_arm.py config.yml refine lora 43
+    python run_arm.py config.yml retest vanilla    # DS-1000 tests only, on the generations already on the Hub
 
 Exit code 0 = all runs of this arm are on the Hub; 1 = failed (traceback uploaded to OUTPUT_REPO/errors/).
 """
@@ -172,6 +173,45 @@ def evaluate(engine, data, cfg, api, kind, seed):
           f"pass@10 {ds_summary['pass@10']:.4f} | {summary['total_minutes']} min", flush=True)
 
 
+def retest(data, cfg, api, kind, seed):
+    """Rerun the DS-1000 tests of a finished run on its uploaded generations (no generation, no GPU).
+
+    Replaces ds1000_results.jsonl, ds1000_per_problem.json and the ds1000 part of summary.json; the Code4ML outputs and
+    the generations stay as they are. The previous scores are kept in summary.json under "retested"."""
+    from huggingface_hub import hf_hub_download
+
+    name = run_name(cfg, kind, seed)
+    fetch = lambda file: hf_hub_download(cfg["output_repo"], f"{name}/{file}", repo_type="dataset")
+    with open(fetch("summary.json")) as handle:
+        summary = json.load(handle)
+    if "retested" in summary:
+        print(f"{name}: already retested, skipping", flush=True)
+        return
+    with open(fetch("ds1000_generations.jsonl")) as handle:
+        generations = [json.loads(line) for line in handle]
+    out = Path("results") / name
+    out.mkdir(parents=True, exist_ok=True)
+    started = time.time()
+
+    results = run_ds1000_tests(generations, name.replace("/", "_"))
+    write_jsonl(out / "ds1000_results.jsonl", results)
+    ds_summary = evalkit.summarize_ds1000(results, data["library_of"])
+    with open(out / "ds1000_per_problem.json", "w") as handle:
+        json.dump(ds_summary.pop("per_problem"), handle)
+
+    previous = summary["ds1000"]
+    summary["ds1000"] = ds_summary
+    summary["retested"] = {"at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+                           "minutes": round((time.time() - started) / 60, 1),
+                           "previous_pass@1": previous["pass@1"], "previous_pass@10": previous["pass@10"]}
+    with open(out / "summary.json", "w") as handle:
+        json.dump(summary, handle, indent=2)
+    api.upload_folder(repo_id=cfg["output_repo"], repo_type="dataset", folder_path=str(out),
+                      path_in_repo=name, commit_message=f"retest {name}")
+    print(f"{name}: DS-1000 pass@1 {previous['pass@1']:.4f} -> {ds_summary['pass@1']:.4f} | "
+          f"pass@10 {previous['pass@10']:.4f} -> {ds_summary['pass@10']:.4f}", flush=True)
+
+
 def refine(engine, data, cfg, api, method, seed):
     ref, gen = cfg["refinement-loop"], cfg["generation"]
     name = run_name(cfg, f"refinement-{method}", seed)
@@ -229,8 +269,13 @@ def main(argv):
     from huggingface_hub import HfApi
 
     api = HfApi()
-    label = kind if mode == "generate" else f"refinement-{kind}"
+    label = {"generate": kind, "refine": f"refinement-{kind}", "retest": f"retest-{kind}"}[mode]
     try:
+        if mode == "retest":
+            data = load_data(cfg)
+            for seed in ARMS[kind]["seeds"]:
+                retest(data, cfg, api, kind, seed)
+            return 0
         on_hub = set(api.list_repo_files(cfg["output_repo"], repo_type="dataset"))
         if mode == "generate":
             todo = [s for s in ARMS[kind]["seeds"] if f"{run_name(cfg, kind, s)}/summary.json" not in on_hub]

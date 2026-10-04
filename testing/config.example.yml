@@ -15,6 +15,13 @@ refinement-loop:
   problems: 200        # proposal: 100-200 DS-1000 problems
   max_iterations: 3    # proposal: at most 3
 
+retest:                # DS-1000 tests only, on the generations already on the Hub (no generation, CPU only)
+  vanilla: false       # replaces ds1000_results / ds1000_per_problem / ds1000 part of summary.json
+  few-shot: false
+  lora: false
+  qlora: false
+  qwen-14b: false
+
 pilot_problems: null   # e.g. 20 for a quick pilot run; null = full evaluation
 
 generation:            # identical for every arm
