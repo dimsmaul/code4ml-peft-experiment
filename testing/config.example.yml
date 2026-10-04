@@ -2,15 +2,15 @@
 # Runs whose summary.json is already on the Hub are skipped, so rerunning resumes where it stopped.
 
 arms:
-  vanilla: false        # Qwen2.5-Coder-7B-Instruct, no fine-tuning
-  few-shot: false       # vanilla + 3 examples in the prompt
-  lora: false           # 3 adapters (seed 42, 43, 44)
-  qlora: false          # 3 adapters on a 4-bit base; enable after QLoRA training finished
-  qwen-14b: true       # Qwen2.5-Coder-14B-Instruct, needs a GPU with >= 40 GB
+  vanilla: true        # Qwen2.5-Coder-7B-Instruct, no fine-tuning
+  few-shot: true       # vanilla + 3 examples in the prompt
+  lora: true           # 3 adapters (seed 42, 43, 44)
+  qlora: true          # 3 adapters on a 4-bit base; enable after QLoRA training finished
+  qwen-14b: false       # Qwen2.5-Coder-14B-Instruct, needs a GPU with >= 40 GB
 
 refinement-loop:
-  lora: false           # needs the lora results on the Hub
-  qlora: false          # needs the qlora results on the Hub
+  lora: true           # needs the lora results on the Hub
+  qlora: true          # needs the qlora results on the Hub
   seed: auto           # auto = median seed by DS-1000 pass@1, or 42 / 43 / 44
   problems: 200        # proposal: 100-200 DS-1000 problems
   max_iterations: 3    # proposal: at most 3
