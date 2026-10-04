@@ -17,6 +17,9 @@ import os
 # Same settings as the official test_ds1000.py: quiet TensorFlow, tests run on CPU only.
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
 os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
+# Headless matplotlib. A Jupyter kernel exports MPLBACKEND=module://matplotlib_inline..., which the test processes
+# would inherit; ds1000-env has no matplotlib_inline, so every matplotlib test failed with "No module named".
+os.environ["MPLBACKEND"] = "Agg"
 # One thread per test process. By default TensorFlow and the BLAS libraries start a thread per host core in every
 # test process; with many parallel tests that exceeds the container's thread limit and TensorFlow aborts
 # ("Thread tf_Compute creation via pthread_create() failed"), which would count as a failed test.
