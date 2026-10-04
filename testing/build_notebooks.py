@@ -22,6 +22,9 @@ ARMS = ["vanilla", "few-shot", "lora", "qlora", "qwen-14b"]
 
 INSTALL = [
     "pip install -q -U vllm datasets huggingface_hub bitsandbytes pyyaml",
+    # vLLM may upgrade torch to another CUDA build; the image's torchaudio then fails to load and transformers
+    # imports it. Audio is not used, so remove it.
+    "pip uninstall -y -q torchaudio",
     "pip install -q uv",
     "uv venv ds1000-env --python 3.10 -q",
     "uv pip install -q --python ds1000-env/bin/python numpy==1.26.4 pandas==1.5.3 scipy==1.12.0 scikit-learn==1.4.0 "
