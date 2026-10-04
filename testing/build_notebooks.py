@@ -326,7 +326,7 @@ the config below. Then **Run All**; the machine stops itself at the end.
 
 MD_SONAR_INSTALL = """
 ## 1b. Install SonarQube on this machine
-Java 21 (Temurin), SonarQube server and sonar-scanner CLI into `/opt`. SonarQube refuses to run as root, so it runs as
+Java 21 (Temurin JDK; Elasticsearch needs `jdk.jlink`), SonarQube server and sonar-scanner CLI into `/opt`. SonarQube refuses to run as root, so it runs as
 user `sonar`. Elasticsearch bootstrap checks are disabled because a container cannot raise `vm.max_map_count`.
 """
 
@@ -335,9 +335,9 @@ SONAR_INSTALL = f"""
 set -e
 cd /opt
 command -v unzip >/dev/null || (apt-get update -qq && apt-get install -y -qq unzip >/dev/null)
-if [ ! -x jre/bin/java ]; then
-  mkdir -p jre
-  curl -sfL "https://api.adoptium.net/v3/binary/latest/21/ga/linux/x64/jre/hotspot/normal/eclipse" | tar -xz -C jre --strip-components=1
+if [ ! -x jdk/bin/jlink ]; then   # a full JDK: SonarQube's Elasticsearch needs the jdk.jlink module (not in a JRE)
+  rm -rf jdk && mkdir -p jdk
+  curl -sfL "https://api.adoptium.net/v3/binary/latest/21/ga/linux/x64/jdk/hotspot/normal/eclipse" | tar -xz -C jdk --strip-components=1
 fi
 if [ ! -d sonarqube ]; then
   curl -sfLo sq.zip https://binaries.sonarsource.com/Distribution/sonarqube/sonarqube-{SONARQUBE_VERSION}.zip
@@ -350,7 +350,7 @@ if [ ! -d sonar-scanner ]; then
 fi
 id sonar >/dev/null 2>&1 || useradd -r -m -s /bin/bash sonar
 chown -R sonar /opt/sonarqube
-jre/bin/java -version 2>&1 | head -1
+jdk/bin/java -version 2>&1 | head -1
 echo "SonarQube {SONARQUBE_VERSION} and sonar-scanner {SCANNER_VERSION} installed"
 """
 
@@ -366,10 +366,10 @@ import time
 
 import httpx
 
-os.environ.update(JAVA_HOME="/opt/jre", SONAR_HOST_URL="http://localhost:9000",
+os.environ.update(JAVA_HOME="/opt/jdk", SONAR_HOST_URL="http://localhost:9000",
                   SONAR_SCANNER="/opt/sonar-scanner/bin/sonar-scanner")
 subprocess.run(["su", "sonar", "-s", "/bin/bash", "-c",
-                "SONAR_JAVA_PATH=/opt/jre/bin/java /opt/sonarqube/bin/linux-x86-64/sonar.sh start"], check=True)
+                "SONAR_JAVA_PATH=/opt/jdk/bin/java /opt/sonarqube/bin/linux-x86-64/sonar.sh start"], check=True)
 deadline = time.time() + 900
 while True:
     try:
