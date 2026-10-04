@@ -232,8 +232,14 @@ def config_for(arms_on, refine_on):
     return "\n".join(lines) + "\n"
 
 
+def install_cell():
+    """pip lines as %pip so they act on the kernel's environment (a bare !pip may be another Python on the PATH)."""
+    lines = [("%" if cmd.startswith("pip ") else "!") + cmd for cmd in INSTALL]
+    return "\n".join(lines) + ' && echo "execution.py ok"'
+
+
 def shared_cells():
-    install = "%" + INSTALL[0] + "\n" + "\n".join("!" + cmd for cmd in INSTALL[1:]) + ' && echo "execution.py ok"'
+    install = install_cell()
     return [
         md(MD_INSTALL), code(install),
         md(MD_HELPERS), *[code(f"%%writefile {name}\n" + text) for name, text in HELPERS.items()],
@@ -410,7 +416,7 @@ SONAR_RUN = REFINE.replace('"config.yml", "refine", method', '"config.yml", "ref
 
 def sonar_notebook():
     helpers = {**HELPERS, "sonar.py": (HERE / "sonar.py").read_text()}
-    install = "%" + INSTALL[0] + "\n" + "\n".join("!" + cmd for cmd in INSTALL[1:]) + ' && echo "execution.py ok"'
+    install = install_cell()
     return notebook([
         md(MD_SONAR_INTRO), md("## 0. Configuration (edit here)"),
         code("%%writefile config.yml\n" + config_for(set(), {"lora", "qlora"})),
