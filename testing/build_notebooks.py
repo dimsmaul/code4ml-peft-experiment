@@ -374,8 +374,9 @@ import httpx
 
 os.environ.update(JAVA_HOME="/opt/jdk", SONAR_HOST_URL="http://localhost:9000",
                   SONAR_SCANNER="/opt/sonar-scanner/bin/sonar-scanner")
+# no check=True: `sonar.sh start` exits 1 when SonarQube already runs (a rerun); the UP check below decides
 subprocess.run(["su", "sonar", "-s", "/bin/bash", "-c",
-                "SONAR_JAVA_PATH=/opt/jdk/bin/java /opt/sonarqube/bin/linux-x86-64/sonar.sh start"], check=True)
+                "SONAR_JAVA_PATH=/opt/jdk/bin/java /opt/sonarqube/bin/linux-x86-64/sonar.sh start"])
 deadline = time.time() + 900
 while True:
     try:
