@@ -21,3 +21,6 @@ answers_*.jsonl
 results_*.jsonl
 ds1000_problems.jsonl
 *.log
+
+
+testing/config.yml
