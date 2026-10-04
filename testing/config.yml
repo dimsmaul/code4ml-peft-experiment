@@ -1,0 +1,35 @@
+# Which parts of the evaluation to run. Upload this file next to index.ipynb, edit, then Run All.
+# Runs whose summary.json is already on the Hub are skipped, so rerunning resumes where it stopped.
+
+arms:
+  vanilla: true        # Qwen2.5-Coder-7B-Instruct, no fine-tuning
+  few-shot: true       # vanilla + 3 examples in the prompt
+  lora: true           # 3 adapters (seed 42, 43, 44)
+  qlora: false         # 3 adapters on a 4-bit base; enable after QLoRA training finished
+  qwen-14b: true       # Qwen2.5-Coder-14B-Instruct, needs a GPU with >= 40 GB
+
+refinement-loop:
+  lora: false          # needs the lora results on the Hub
+  qlora: false         # needs the qlora results on the Hub
+  seed: auto           # auto = median seed by DS-1000 pass@1, or 42 / 43 / 44
+  problems: 200        # proposal: 100-200 DS-1000 problems
+  max_iterations: 3    # proposal: at most 3
+
+pilot_problems: null   # e.g. 20 for a quick pilot run; null = full evaluation
+
+generation:            # identical for every arm
+  ds1000_samples: 10   # pass@1 and pass@10 from 10 samples per problem
+  ds1000_temperature: 0.8
+  ds1000_top_p: 0.95
+  max_new_tokens: 1024
+  max_model_len: 8192
+  seed: 0
+
+# Credentials. Used only when the matching environment variable (HF_TOKEN / VAST_API_KEY) is not set.
+# Keep these empty in any copy you share, commit or upload anywhere except the GPU machine.
+hf_token: ""          # Hugging Face token with Write access (huggingface.co/settings/tokens)
+vast_api_key: ""      # Vast.ai API key (cloud.vast.ai -> Keys -> API Keys); lets the machine stop itself
+
+output_repo: dimsmauls/code4ml-eval-outputs   # private dataset repo for every result
+dataset: dimsmauls/code4ml-annotated-rated
+auto_shutdown: true    # stop the machine at the end (success or failure); needs VAST_API_KEY

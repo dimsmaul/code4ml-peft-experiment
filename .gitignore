@@ -1,0 +1,23 @@
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+.ipynb_checkpoints/
+
+# OS
+.DS_Store
+
+# Secrets
+.env
+.env.*
+
+# Created when the notebooks / index.py run on the GPU machine
+outputs/
+results/
+ds1000-env/
+execution.py
+answers_*.jsonl
+results_*.jsonl
+ds1000_problems.jsonl
+*.log
