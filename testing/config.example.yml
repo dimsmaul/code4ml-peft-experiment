@@ -7,6 +7,10 @@ arms:
   lora: true           # 3 adapters (seed 42, 43, 44)
   qlora: true          # 3 adapters (trained 4-bit, evaluated on bf16 base); enable after QLoRA training finished
   qwen-14b: false       # Qwen2.5-Coder-14B-Instruct, needs a GPU with >= 40 GB
+  # LoRA hyperparameter sensitivity, seed 42; enable after hyperparameter/index.ipynb pushed the adapters
+  hp-lora-cosine: false     # cosine scheduler + 3% warmup
+  hp-lora-r32: false        # rank 32, alpha 64
+  hp-lora-lr1e-4: false     # learning rate 1e-4
 
 refinement-loop:
   lora: true           # needs the lora results on the Hub

@@ -37,6 +37,12 @@ ARMS = {
                   quant=False, fewshot=False),
     "qwen-14b": dict(base=BASE_14B, adapter=None, seeds=[None], quant=False, fewshot=False),
 }
+# LoRA hyperparameter sensitivity (hyperparameter/index.ipynb): one changed hyperparameter per adapter, seed 42, stored
+# in HPARAM_REPO under lora-<config>/seed-42/. Evaluated as arm hp-lora-<config>.
+HPARAM_REPO = "dimsmauls/qwen2.5-coder-7b-code4ml-hparam"
+for _config, _rank in (("cosine", 8), ("r32", 32), ("lr1e-4", 8)):
+    ARMS[f"hp-lora-{_config}"] = dict(base=BASE_7B, adapter=HPARAM_REPO, adapter_dir=f"lora-{_config}",
+                                      seeds=[42], quant=False, fewshot=False, max_lora_rank=max(16, _rank))
 
 
 def prefix(cfg):
@@ -87,7 +93,8 @@ class Engine:
         self.arm = arm
         self.llm = LLM(model=arm["base"], dtype="bfloat16", max_model_len=gen["max_model_len"],
                        gpu_memory_utilization=0.90, seed=gen["seed"], enable_lora=arm["adapter"] is not None,
-                       max_lora_rank=16, **({"quantization": "bitsandbytes"} if arm["quant"] else {}))
+                       max_lora_rank=arm.get("max_lora_rank", 16),
+                       **({"quantization": "bitsandbytes"} if arm["quant"] else {}))
         self.tokenizer = self.llm.get_tokenizer()
         self.gpu = torch.cuda.get_device_name(0)
         self.versions = {"vllm": vllm.__version__, "torch": torch.__version__}
@@ -101,8 +108,9 @@ class Engine:
         from huggingface_hub import snapshot_download
         from vllm.lora.request import LoRARequest
 
-        local = snapshot_download(self.arm["adapter"], allow_patterns=[f"seed-{seed}/*"])
-        return LoRARequest(f"seed-{seed}", seed, f"{local}/seed-{seed}")
+        folder = f"{self.arm['adapter_dir']}/seed-{seed}" if self.arm.get("adapter_dir") else f"seed-{seed}"
+        local = snapshot_download(self.arm["adapter"], allow_patterns=[f"{folder}/*"])
+        return LoRARequest(folder, seed, f"{local}/{folder}")
 
     def generate(self, prompts, request, **sampling):
         from vllm import SamplingParams
