@@ -1,6 +1,7 @@
 """Evaluate one arm, or one refinement run, and push the results to the Hub.
 
-Called by index.ipynb, one process per arm so GPU memory is fully released between models:
+Called by the testing entry points, one process per arm so GPU memory is fully released between models (index.py and
+index.ipynb run it inside src/ with ../config.yml; the standalone notebooks with config.yml next to them):
 
     python run_arm.py config.yml generate lora
     python run_arm.py config.yml refine lora 43
@@ -37,7 +38,7 @@ ARMS = {
                   quant=False, fewshot=False),
     "qwen-14b": dict(base=BASE_14B, adapter=None, seeds=[None], quant=False, fewshot=False),
 }
-# LoRA hyperparameter sensitivity (hyperparameter/index.ipynb): one changed hyperparameter per adapter, seed 42, stored
+# LoRA hyperparameter sensitivity (training/hyperparameter/index.ipynb): one changed hyperparameter per adapter, seed 42, stored
 # in HPARAM_REPO under lora-<config>/seed-42/. Evaluated as arm hp-lora-<config>.
 HPARAM_REPO = "dimsmauls/qwen2.5-coder-7b-code4ml-hparam"
 for _config, _rank in (("cosine", 8), ("r32", 32), ("lr1e-4", 8)):

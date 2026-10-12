@@ -1,4 +1,9 @@
-from evalkit import (
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+
+from evalkit import (  # noqa: E402
     ast_valid,
     code4ml_messages,
     ds1000_code,
