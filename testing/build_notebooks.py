@@ -287,6 +287,8 @@ def index_script():
         "# 2. Helper files",
         f"HELPERS = {HELPERS!r}",
         "for name, text in HELPERS.items():",
+        "    if os.path.exists(name):   # cloned repo: keep the source file from git, the embedded copy may be older",
+        "        continue",
         "    with open(name, \"w\") as handle:",
         "        handle.write(text)",
         "",
