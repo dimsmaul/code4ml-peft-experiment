@@ -3,6 +3,7 @@
     index.py                                run every arm enabled in config.yml (terminal: python index.py)
     index.ipynb                             the same, as a notebook
     arms/<arm>/index.ipynb                  one arm only, with its own config embedded
+    ../shot-testing/<group>/index.ipynb     prompting-shot comparison (1 and 3 examples), one model group
     refinement-loop/execution/<m>/index.ipynb
     refinement-loop/sonar/index.ipynb       refinement with execution + SonarQube feedback
 
@@ -131,7 +132,7 @@ if arms or refine_methods:  # retest alone runs on CPU
     name, total_mb = subprocess.run(["nvidia-smi", "--query-gpu=name,memory.total", "--format=csv,noheader,nounits"],
                                     capture_output=True, text=True, check=True).stdout.strip().split(", ")
     print(f"GPU: {name}, {int(total_mb) / 1024:.0f} GB")
-    if "qwen-14b" in arms and int(total_mb) < 40 * 1024:
+    if any(kind.startswith("qwen-14b") for kind in arms) and int(total_mb) < 40 * 1024:
         raise SystemExit("qwen-14b needs a GPU with >= 40 GB: disable it in config.yml or rent a bigger GPU")
 
 token = os.environ.get("HF_TOKEN")
@@ -330,6 +331,24 @@ SINGLE = {
     "qwen-14b": ("qwen-14b", "Qwen2.5-Coder-14B-Instruct without fine-tuning. GPU: >= 40 GB, disk 90 GB."),
 }
 
+# shots/<group>/index.ipynb: the prompting-shot comparison, every model with 1 and 3 training examples in the prompt
+# (1 shot = first of the 3 examples). 0 shots and vanilla with 3 shots are the existing runs.
+SHOTS_NOTE = ("1 shot = the first of the 3 few-shot examples; 0 shots are the existing runs of the plain arms, vanilla "
+              "with 3 shots is the existing few-shot arm.")
+SHOT_GROUPS = {
+    "vanilla": ("shots: vanilla 7B + qwen-14b",
+                f"Vanilla 7B with 1 shot, Qwen2.5-Coder-14B with 1 and 3 shots. {SHOTS_NOTE} GPU: >= 40 GB (14B), disk "
+                "90 GB.", {"vanilla-1shot", "qwen-14b-1shot", "qwen-14b-3shot"}),
+    "lora": ("shots: lora", f"LoRA adapters, seeds 42, 43, 44, with 1 and 3 shots. {SHOTS_NOTE} GPU: 24 GB, disk 60 GB.",
+             {"lora-1shot", "lora-3shot"}),
+    "lora-hparam": ("shots: lora hyperparameter variants",
+                    f"LoRA sensitivity adapters (cosine, r32, lr1e-4), seed 42, with 1 and 3 shots. {SHOTS_NOTE} "
+                    "GPU: 24 GB, disk 60 GB.",
+                    {f"hp-lora-{c}-{k}shot" for c in ("cosine", "r32", "lr1e-4") for k in (1, 3)}),
+    "qlora": ("shots: qlora", f"QLoRA adapters, seeds 42, 43, 44, with 1 and 3 shots. {SHOTS_NOTE} GPU: 24 GB, disk 60 GB.",
+              {"qlora-1shot", "qlora-3shot"}),
+}
+
 
 # ---------------------------------------------------------------------------------------------------------------------
 # refinement-loop/sonar/index.ipynb: refinement with execution + SonarQube feedback, SonarQube installed on the GPU
@@ -464,6 +483,11 @@ def main():
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(single_notebook(title, description, config_for({kind}, set())), indent=1))
         print("wrote", path.relative_to(TESTING))
+    for group, (title, description, kinds) in SHOT_GROUPS.items():
+        path = TESTING.parent / "shot-testing" / group / "index.ipynb"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(single_notebook(title, description, config_for(kinds, set())), indent=1))
+        print("wrote", path.relative_to(TESTING.parent))
     for method in ("lora", "qlora"):
         path = TESTING / "refinement-loop" / "execution" / method / "index.ipynb"
         path.parent.mkdir(parents=True, exist_ok=True)

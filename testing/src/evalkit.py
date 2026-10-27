@@ -77,7 +77,8 @@ def summarize_ds1000(results: list[dict], library_of: dict[int, str], k_values=(
 
 
 def select_fewshot(rows: list[dict], k: int = FEWSHOT_K, seed: int = FEWSHOT_SEED) -> list[dict]:
-    return random.Random(seed).sample(rows, k)
+    """First k of the same FEWSHOT_K examples, so a 1-shot prompt uses the first example of the 3-shot prompt."""
+    return random.Random(seed).sample(rows, FEWSHOT_K)[:k]
 
 
 def fewshot_ds1000_ids(n_problems: int = 1000, k: int = FEWSHOT_K, seed: int = FEWSHOT_SEED) -> list[int]:

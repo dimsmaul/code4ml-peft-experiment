@@ -27,23 +27,29 @@ import evalkit
 EXTRACTION = "python_block"   # how code is taken from a reply (evalkit.python_block); retest skips runs that match
 BASE_7B = "Qwen/Qwen2.5-Coder-7B-Instruct"
 BASE_14B = "Qwen/Qwen2.5-Coder-14B-Instruct"
-ARMS = {
-    "vanilla": dict(base=BASE_7B, adapter=None, seeds=[None], quant=False, fewshot=False),
-    "few-shot": dict(base=BASE_7B, adapter=None, seeds=[None], quant=False, fewshot=True),
+ARMS = {   # shots = training examples in the prompt (evalkit.select_fewshot / fewshot_ds1000_ids)
+    "vanilla": dict(base=BASE_7B, adapter=None, seeds=[None], quant=False, shots=0),
+    "few-shot": dict(base=BASE_7B, adapter=None, seeds=[None], quant=False, shots=3),
     "lora": dict(base=BASE_7B, adapter="dimsmauls/qwen2.5-coder-7b-code4ml-lora", seeds=[42, 43, 44],
-                 quant=False, fewshot=False),
+                 quant=False, shots=0),
     # Trained on a 4-bit NF4 base; evaluated on the bf16 base like LoRA, since vLLM >= 0.30 dropped bitsandbytes and
     # every arm must run on the same engine.
     "qlora": dict(base=BASE_7B, adapter="dimsmauls/qwen2.5-coder-7b-code4ml-qlora", seeds=[42, 43, 44],
-                  quant=False, fewshot=False),
-    "qwen-14b": dict(base=BASE_14B, adapter=None, seeds=[None], quant=False, fewshot=False),
+                  quant=False, shots=0),
+    "qwen-14b": dict(base=BASE_14B, adapter=None, seeds=[None], quant=False, shots=0),
 }
 # LoRA hyperparameter sensitivity (training/hyperparameter/index.ipynb): one changed hyperparameter per adapter, seed 42, stored
 # in HPARAM_REPO under lora-<config>/seed-42/. Evaluated as arm hp-lora-<config>.
 HPARAM_REPO = "dimsmauls/qwen2.5-coder-7b-code4ml-hparam"
 for _config, _rank in (("cosine", 8), ("r32", 32), ("lr1e-4", 8)):
     ARMS[f"hp-lora-{_config}"] = dict(base=BASE_7B, adapter=HPARAM_REPO, adapter_dir=f"lora-{_config}",
-                                      seeds=[42], quant=False, fewshot=False, max_lora_rank=max(16, _rank))
+                                      seeds=[42], quant=False, shots=0, max_lora_rank=max(16, _rank))
+# Prompting shots: every model again with 1 and 3 examples in the prompt, as arm <model>-<k>shot. 0 shots are the arms
+# above; vanilla with 3 shots is the existing few-shot arm.
+for _model in ("vanilla", "qwen-14b", "lora", "qlora", "hp-lora-cosine", "hp-lora-r32", "hp-lora-lr1e-4"):
+    for _shots in (1, 3):
+        if (_model, _shots) != ("vanilla", 3):
+            ARMS[f"{_model}-{_shots}shot"] = {**ARMS[_model], "shots": _shots}
 
 
 def prefix(cfg):
@@ -137,7 +143,7 @@ def evaluate(engine, data, cfg, api, kind, seed):
     started = time.time()
 
     # Structural track: one greedy answer per Code4ML test instruction.
-    shots = evalkit.select_fewshot(data["code4ml_train"]) if arm["fewshot"] else []
+    shots = evalkit.select_fewshot(data["code4ml_train"], arm["shots"]) if arm["shots"] else []
     prompts = [engine.prompt(evalkit.code4ml_messages(row["instruction"], shots)) for row in data["code4ml_test"]]
     outputs = engine.generate(prompts, request, temperature=0.0, max_tokens=gen["max_new_tokens"])
     code4ml_rows = []
@@ -152,7 +158,7 @@ def evaluate(engine, data, cfg, api, kind, seed):
 
     # Functional track: sampled answers per DS-1000 problem.
     problems, eval_ids = data["problems"], data["eval_ids"]
-    ds_shots = [problems[pid] for pid in data["fewshot_ids"]] if arm["fewshot"] else []
+    ds_shots = [problems[pid] for pid in data["fewshot_ids"][:arm["shots"]]]   # first k of the 3 excluded problems
     prompts = [engine.prompt(evalkit.ds1000_messages(problems[pid]["prompt"], ds_shots)) for pid in eval_ids]
     outputs = engine.generate(prompts, request, n=gen["ds1000_samples"], temperature=gen["ds1000_temperature"],
                               top_p=gen["ds1000_top_p"], max_tokens=gen["max_new_tokens"], seed=gen["seed"])
@@ -170,7 +176,8 @@ def evaluate(engine, data, cfg, api, kind, seed):
     valid = sum(r["ast_valid"] for r in code4ml_rows)
     summary = {
         "run": name, "base_model": arm["base"], "adapter_repo": arm["adapter"], "seed": seed,
-        "quantized_4bit": arm["quant"], "fewshot": arm["fewshot"], "fewshot_ds1000_ids": data["fewshot_ids"],
+        "quantized_4bit": arm["quant"], "fewshot": arm["shots"] > 0, "shots": arm["shots"],
+        "fewshot_ds1000_ids": data["fewshot_ids"],
         "gpu": engine.gpu, "versions": engine.versions, "pilot_problems": cfg.get("pilot_problems"),
         "generation": {**gen, "code4ml": "greedy"}, "code_extraction": EXTRACTION,
         "code4ml": {"answers": len(code4ml_rows), "ast_valid": valid, "ast_valid_rate": valid / len(code4ml_rows)},
