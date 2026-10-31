@@ -50,6 +50,13 @@ for _model in ("vanilla", "qwen-14b", "lora", "qlora", "hp-lora-cosine", "hp-lor
     for _shots in (1, 3):
         if (_model, _shots) != ("vanilla", 3):
             ARMS[f"{_model}-{_shots}shot"] = {**ARMS[_model], "shots": _shots}
+# POC: small models fine-tuned with QLoRA on the ML code mix (training/ml-mix/), adapter files at the repo root, one run
+# each. fp16 because they are evaluated on a free Colab T4, which has no bf16.
+ARMS["qwen-0.5b-mix"] = dict(base="Qwen/Qwen2.5-Coder-0.5B-Instruct", adapter="dimsmauls/qwen2.5-coder-0.5b-ml-mix-qlora",
+                             seeds=[None], quant=False, shots=0, dtype="float16")
+ARMS["deepseek-1.3b-mix"] = dict(base="deepseek-ai/deepseek-coder-1.3b-instruct",
+                                 adapter="dimsmauls/deepseek-coder-1.3b-ml-mix-qlora",
+                                 seeds=[None], quant=False, shots=0, dtype="float16")
 
 
 def prefix(cfg):
@@ -98,7 +105,7 @@ class Engine:
         import vllm
 
         self.arm = arm
-        self.llm = LLM(model=arm["base"], dtype="bfloat16", max_model_len=gen["max_model_len"],
+        self.llm = LLM(model=arm["base"], dtype=arm.get("dtype", "bfloat16"), max_model_len=gen["max_model_len"],
                        gpu_memory_utilization=0.90, seed=gen["seed"], enable_lora=arm["adapter"] is not None,
                        max_lora_rank=arm.get("max_lora_rank", 16),
                        **({"quantization": "bitsandbytes"} if arm["quant"] else {}))
@@ -115,7 +122,9 @@ class Engine:
         from huggingface_hub import snapshot_download
         from vllm.lora.request import LoRARequest
 
-        folder = f"{self.arm['adapter_dir']}/seed-{seed}" if self.arm.get("adapter_dir") else f"seed-{seed}"
+        if seed is None:   # adapter files at the repo root (no seed-<n> folder)
+            return LoRARequest(self.arm["adapter"].split("/")[-1], 1, snapshot_download(self.arm["adapter"]))
+        folder =f"{self.arm['adapter_dir']}/seed-{seed}" if self.arm.get("adapter_dir") else f"seed-{seed}"
         local = snapshot_download(self.arm["adapter"], allow_patterns=[f"{folder}/*"])
         return LoRARequest(folder, seed, f"{local}/{folder}")
 
