@@ -543,12 +543,12 @@ def fine_tuning_notebook():
 MD_CA_INTRO = """
 # Justification POC 1 — prompting shots on general programming (CodeAlpaca-20k, ROUGE-L)
 
-Quick check: does prompting with examples behave the same outside the ML domain? The Qwen2.5-Coder-7B LoRA adapter
-(seed 42) answers 500 CodeAlpaca-20k instructions (fixed shuffle, seed 42) with 1 and 3 examples in the prompt (1 shot =
-the first of the 3 examples, taken right after the test rows), 2 runs. Greedy decoding; each reply is scored with
+Quick check: does prompting with examples behave the same outside the ML domain? Qwen2.5-Coder-7B-Instruct without
+(vanilla) and with the LoRA adapter (seed 42) answers 500 CodeAlpaca-20k instructions (fixed shuffle, seed 42) with 1 and
+3 examples in the prompt (1 shot = the first of the 3 examples, taken right after the test rows), 4 runs. Greedy decoding; each reply is scored with
 ROUGE-L F1 against the reference, as in Nguyen et al. (IJECE 2026), which fine-tuned on the same dataset.
 
-Results: `<output_prefix>/lora-seed-42-<k>shot/{outputs.jsonl, summary.json}` in `output_repo`. Every run checks its
+Results: `<output_prefix>/{vanilla,lora-seed-42}-<k>shot/{outputs.jsonl, summary.json}` in `output_repo`. Every run checks its
 replies (raw Ġ/Ċ or empty = wrong tokenizer) and stops before spending more GPU time.
 
 **Machine:** GPU 24 GB (RTX 4090 / 3090), CUDA >= 13, disk 50 GB. **Credentials:** `HF_TOKEN` (write)
@@ -558,7 +558,7 @@ skipped; the machine stops itself at the end.
 
 CA_CONFIG = """
 models:
-  qwen-7b: true      # LoRA adapter seed 42, 1 and 3 shots
+  qwen-7b: true      # vanilla + LoRA adapter seed 42, 1 and 3 shots
 test_size: 500
 max_new_tokens: 512
 max_model_len: 4096
