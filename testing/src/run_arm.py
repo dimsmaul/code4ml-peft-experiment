@@ -57,6 +57,15 @@ ARMS["qwen-0.5b-mix"] = dict(base="Qwen/Qwen2.5-Coder-0.5B-Instruct", adapter="d
 ARMS["deepseek-1.3b-mix"] = dict(base="deepseek-ai/deepseek-coder-1.3b-instruct",
                                  adapter="dimsmauls/deepseek-coder-1.3b-ml-mix-qlora",
                                  seeds=[None], quant=False, shots=0, dtype="float16")
+# Justification POC (justification/fine-tuning/): other ~7B instruct models, without and with a LoRA adapter trained like
+# the Qwen LoRA arm (seed 42 only).
+for _key, _base, _repo in (
+        ("deepseek-6.7b", "deepseek-ai/deepseek-coder-6.7b-instruct", "dimsmauls/deepseek-coder-6.7b-code4ml-lora"),
+        ("seed-coder-8b", "ByteDance-Seed/Seed-Coder-8B-Instruct", "dimsmauls/seed-coder-8b-code4ml-lora")):
+    ARMS[_key] = dict(base=_base, adapter=None, seeds=[None], quant=False, shots=0)
+    ARMS[f"{_key}-lora"] = dict(base=_base, adapter=_repo, seeds=[42], quant=False, shots=0)
+    for _model in (_key, f"{_key}-lora"):   # + 3 examples in the prompt
+        ARMS[f"{_model}-3shot"] = {**ARMS[_model], "shots": 3}
 
 
 def prefix(cfg):

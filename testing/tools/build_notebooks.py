@@ -6,6 +6,8 @@
     ../shot-testing/<group>/index.ipynb     prompting-shot comparison (1 and 3 examples), one model group
     refinement-loop/execution/<m>/index.ipynb
     refinement-loop/sonar/index.ipynb       refinement with execution + SonarQube feedback
+    ../justification/fine-tuning/index.ipynb    POC: LoRA on other ~7B models (embeds justification/.../train_lora.py)
+    ../justification/shot-promting/index.ipynb  POC: shots on CodeAlpaca-20k, ROUGE-L (embeds .../codealpaca.py)
 
 src/evalkit.py, src/ds1000_runner.py and src/run_arm.py are embedded verbatim, so on the GPU machine you upload one entry
 point (plus config.yml for the two run-all versions). index.py and index.ipynb work inside src/, so the testing root keeps
@@ -237,7 +239,7 @@ def config_for(arms_on, refine_on):
     for line in CONFIG_TEMPLATE.splitlines():
         if line and not line.startswith((" ", "#")):
             section = line.split(":")[0]
-        match = re.match(r"^(  )([\w-]+)(:\s*)(true|false)(.*)$", line)
+        match = re.match(r"^(  )([\w.-]+)(:\s*)(true|false)(.*)$", line)
         if match and section in ("arms", "refinement-loop", "retest"):
             key = match.group(2)
             enabled = key in {"arms": arms_on, "refinement-loop": refine_on}.get(section, ())
@@ -473,7 +475,162 @@ def sonar_notebook():
     ])
 
 
+# ---------------------------------------------------------------------------------------------------------------------
+# ../justification/: quick POCs that check where the weak result comes from (model? domain?). Same vLLM version as the
+# shot-testing runs.
+JUSTIFICATION = TESTING.parent / "justification"
+VLLM_PIN = "vllm==0.32.0"   # needs a CUDA >= 13 driver on the machine
+
+MD_FT_INTRO = """
+# Justification POC 2 — fine-tuning other ~7B models
+
+Is the weak result specific to Qwen2.5-Coder-7B? DeepSeek-Coder-6.7B-Instruct and Seed-Coder-8B-Instruct get a LoRA
+adapter with exactly the hyperparameters of the Qwen LoRA arm (r 8, alpha 16, lr 2e-4, 3 epochs + early stopping,
+Code4ML `training` split), **one seed (42)**. Then DS-1000 pass@k (+ the Code4ML replies) for each model **without and
+with** the adapter, with 0 and 3 examples in the prompt (the same 3 examples as the thesis few-shot arm), the same
+evaluation as every thesis arm.
+
+| Step | Output |
+|---|---|
+| `train_lora.py <model>` | adapter in `dimsmauls/<model>-code4ml-lora/seed-42/` (~15 min each on an A100) |
+| arms `<model>`, `<model>-lora`, `<model>-3shot`, `<model>-lora-3shot` for `deepseek-6.7b` and `seed-coder-8b` (8 runs) | `<arm>/...` in `output_repo` |
+
+Every run checks its first replies (raw Ġ/Ċ or empty = wrong tokenizer) and stops before the long DS-1000 track.
+
+**Machine:** GPU >= 40 GB (A100 80 GB recommended; the Qwen LoRA run peaked at 28.7 GB), CUDA >= 13, disk 100 GB.
+**Credentials:** `HF_TOKEN` (write) and `VAST_API_KEY`, as environment variables or in the config below.
+Then **Run All**; finished steps are skipped on a rerun; the machine stops itself at the end.
+"""
+
+MD_FT_TRAIN = """
+## 3b. Train the LoRA adapters
+A failed training uploads its traceback to `<adapter repo>/errors/` and its `-lora` arm is skipped.
+"""
+
+FT_TRAIN = """
+if any(kind.endswith("-lora") for kind in arms) and int(total_mb) < 40 * 1024:
+    raise SystemExit("LoRA training needs a GPU with >= 40 GB (the Qwen 7B LoRA run peaked at 28.7 GB)")
+for key in ("deepseek-6.7b", "seed-coder-8b"):
+    lora_arms = [kind for kind in arms if kind.startswith(f"{key}-lora")]
+    if not lora_arms:
+        continue
+    print(f"\\n########## train {key} ##########", flush=True)
+    if stream([sys.executable, "train_lora.py", key]) != 0:
+        failed.append(f"train-{key}")
+        arms = [kind for kind in arms if kind not in lora_arms]   # no adapter to evaluate
+print("failed:", failed)
+"""
+
+
+def fine_tuning_notebook():
+    helpers = {**HELPERS, "train_lora.py": (JUSTIFICATION / "fine-tuning" / "train_lora.py").read_text()}
+    kinds = {f"{m}{s}" for m in ("deepseek-6.7b", "deepseek-6.7b-lora", "seed-coder-8b", "seed-coder-8b-lora")
+             for s in ("", "-3shot")}
+    install = install_cell().replace("-U vllm ", f"-U {VLLM_PIN} ") + "\n%pip install -q peft accelerate"
+    return notebook([
+        md(MD_FT_INTRO), md("## 0. Configuration (edit here)"),
+        code("%%writefile config.yml\n" + config_for(kinds, set())),
+        md(MD_INSTALL), code(install),
+        md(MD_HELPERS + "`train_lora.py` trains one adapter.\n"),
+        *[code(f"%%writefile {name}\n" + text) for name, text in helpers.items()],
+        md(MD_SETUP), code(SETUP),
+        md(MD_FT_TRAIN), code(FT_TRAIN),
+        md(MD_RUN), code(RUN_ARMS),
+        md(MD_SHUTDOWN), code(SHUTDOWN),
+    ])
+
+
+MD_CA_INTRO = """
+# Justification POC 1 — prompting shots on general programming (CodeAlpaca-20k, ROUGE-L)
+
+Quick check: does prompting with examples behave the same outside the ML domain? The Qwen2.5-Coder-7B LoRA adapter
+(seed 42) answers 500 CodeAlpaca-20k instructions (fixed shuffle, seed 42) with 1 and 3 examples in the prompt (1 shot =
+the first of the 3 examples, taken right after the test rows), 2 runs. Greedy decoding; each reply is scored with
+ROUGE-L F1 against the reference, as in Nguyen et al. (IJECE 2026), which fine-tuned on the same dataset.
+
+Results: `<output_prefix>/lora-seed-42-<k>shot/{outputs.jsonl, summary.json}` in `output_repo`. Every run checks its
+replies (raw Ġ/Ċ or empty = wrong tokenizer) and stops before spending more GPU time.
+
+**Machine:** GPU 24 GB (RTX 4090 / 3090), CUDA >= 13, disk 50 GB. **Credentials:** `HF_TOKEN` (write)
+and `VAST_API_KEY`, as environment variables or in the config below. Then **Run All**; runs already on the Hub are
+skipped; the machine stops itself at the end.
+"""
+
+CA_CONFIG = """
+models:
+  qwen-7b: true      # LoRA adapter seed 42, 1 and 3 shots
+test_size: 500
+max_new_tokens: 512
+max_model_len: 4096
+
+# Credentials. Used only when the matching environment variable (HF_TOKEN / VAST_API_KEY) is not set.
+# Keep these empty in any copy you share, commit or upload anywhere except the GPU machine.
+hf_token: ""
+vast_api_key: ""
+
+output_repo: dimsmauls/code4ml-eval-outputs
+output_prefix: justification/codealpaca
+auto_shutdown: true    # stop the machine at the end (success or failure); needs VAST_API_KEY
+"""
+
+CA_SETUP = """
+import os, subprocess, sys
+import yaml
+from huggingface_hub import HfApi, login
+
+cfg = yaml.safe_load(open("config.yml"))
+for key, env in (("hf_token", "HF_TOKEN"), ("vast_api_key", "VAST_API_KEY")):
+    if cfg.get(key) and not os.environ.get(env):
+        os.environ[env] = str(cfg[key])
+print("HF_TOKEN set:", bool(os.environ.get("HF_TOKEN")), "| VAST_API_KEY set:", bool(os.environ.get("VAST_API_KEY")))
+models = [m for m, enabled in cfg["models"].items() if enabled]
+name, total_mb = subprocess.run(["nvidia-smi", "--query-gpu=name,memory.total", "--format=csv,noheader,nounits"],
+                                capture_output=True, text=True, check=True).stdout.strip().split(", ")
+print(f"GPU: {name}, {int(total_mb) / 1024:.0f} GB | models: {models}")
+
+token = os.environ.get("HF_TOKEN")
+login(token=token) if token else login()
+api = HfApi()
+api.create_repo(cfg["output_repo"], repo_type="dataset", private=True, exist_ok=True)
+
+def stream(cmd):
+    \"\"\"Run a command and show its output live in the notebook.\"\"\"
+    process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
+    for line in process.stdout:
+        print(line, end="")
+    return process.wait()
+
+failed = []
+"""
+
+CA_RUN = """
+for model in models:   # one process per base model, so GPU memory is fully released in between
+    print(f"\\n########## {model} ##########", flush=True)
+    if stream([sys.executable, "codealpaca.py", "config.yml", model]) != 0:
+        failed.append(model)
+print("failed:", failed)
+"""
+
+
+def codealpaca_notebook():
+    return notebook([
+        md(MD_CA_INTRO), md("## 0. Configuration (edit here)"), code("%%writefile config.yml\n" + CA_CONFIG.lstrip()),
+        md("## 1. Install\nvLLM pinned to the version of the shot-testing runs; `rouge-score` for ROUGE-L."),
+        code(f"%pip install -q {VLLM_PIN} datasets huggingface_hub pyyaml rouge-score\n"
+             "%pip uninstall -y -q torchaudio"),
+        md("## 2. Script\n`codealpaca.py`: generation, ROUGE-L and upload for one base model."),
+        code("%%writefile codealpaca.py\n" + (JUSTIFICATION / "shot-promting" / "codealpaca.py").read_text()),
+        md("## 3. Read `config.yml`, check the GPU, log in"), code(CA_SETUP),
+        md("## 4. Run"), code(CA_RUN),
+        md(MD_SHUTDOWN), code(SHUTDOWN),
+    ])
+
+
 def main():
+    for path, nb in ((JUSTIFICATION / "fine-tuning" / "index.ipynb", fine_tuning_notebook()),
+                     (JUSTIFICATION / "shot-promting" / "index.ipynb", codealpaca_notebook())):
+        path.write_text(json.dumps(nb, indent=1))
+        print("wrote", path.relative_to(TESTING.parent))
     index = notebook([md(MD_INTRO), code(INTO_SRC), *shared_cells(INDEX_CONFIG)])
     (TESTING / "index.ipynb").write_text(json.dumps(index, indent=1))
     (TESTING / "index.py").write_text(index_script())
