@@ -146,6 +146,14 @@ def run_ds1000_tests(answers, tag):
         return [json.loads(line) for line in handle]
 
 
+def check_replies(completions, name):
+    """Stop a run whose replies are broken (wrong tokenizer: raw Ġ/Ċ; or mostly empty) before it spends more GPU time."""
+    garbled = sum("Ġ" in c or "Ċ" in c for c in completions)
+    empty = sum(not c.strip() for c in completions)
+    if garbled > 0.01 * len(completions) or empty > 0.1 * len(completions):
+        raise RuntimeError(f"{name}: {garbled}/{len(completions)} replies with raw Ġ/Ċ, {empty} empty; stopping")
+
+
 def evaluate(engine, data, cfg, api, kind, seed):
     arm, gen = ARMS[kind], cfg["generation"]
     name = run_name(cfg, kind, seed)
@@ -167,6 +175,7 @@ def evaluate(engine, data, cfg, api, kind, seed):
                              "instruction": row["instruction"], "completion": completion,
                              "code": code, "ast_valid": evalkit.ast_valid(code)})
     write_jsonl(out / "code4ml_outputs.jsonl", code4ml_rows)
+    check_replies([r["completion"] for r in code4ml_rows], name)   # before the long DS-1000 track
 
     # Functional track: sampled answers per DS-1000 problem.
     problems, eval_ids = data["problems"], data["eval_ids"]
