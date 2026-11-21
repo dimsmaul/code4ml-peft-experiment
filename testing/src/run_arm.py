@@ -123,9 +123,12 @@ class Engine:
         from vllm.lora.request import LoRARequest
 
         if seed is None:   # adapter files at the repo root (no seed-<n> folder)
-            return LoRARequest(self.arm["adapter"].split("/")[-1], 1, snapshot_download(self.arm["adapter"]))
+            # adapter_* only: vLLM takes a tokenizer found next to the adapter, and the one saved with the deepseek
+            # adapter does not decode byte-level BPE (raw Ġ/Ċ in the output); the base model's tokenizer is used instead
+            local = snapshot_download(self.arm["adapter"], allow_patterns=["adapter_*"])
+            return LoRARequest(self.arm["adapter"].split("/")[-1], 1, local)
         folder =f"{self.arm['adapter_dir']}/seed-{seed}" if self.arm.get("adapter_dir") else f"seed-{seed}"
-        local = snapshot_download(self.arm["adapter"], allow_patterns=[f"{folder}/*"])
+        local = snapshot_download(self.arm["adapter"], allow_patterns=[f"{folder}/adapter_*"])   # base tokenizer, see above
         return LoRARequest(folder, seed, f"{local}/{folder}")
 
     def generate(self, prompts, request, **sampling):
