@@ -529,7 +529,10 @@ def fine_tuning_notebook():
     install = install_cell().replace("-U vllm ", f"-U {VLLM_PIN} ") + "\n%pip install -q peft accelerate"
     return notebook([
         md(MD_FT_INTRO), md("## 0. Configuration (edit here)"),
-        code("%%writefile config.yml\n" + config_for(kinds, set())),
+        # quick POC: Pass@1 from 1 sample per problem (Pass@10 is meaningless with 1 sample)
+        code("%%writefile config.yml\n" + config_for(kinds, set()).replace(
+            "ds1000_samples: 10   # pass@1 and pass@10 from 10 samples per problem",
+            "ds1000_samples: 1    # POC: pass@1 from 1 sample per problem")),
         md(MD_INSTALL), code(install),
         md(MD_HELPERS + "`train_lora.py` trains one adapter.\n"),
         *[code(f"%%writefile {name}\n" + text) for name, text in helpers.items()],
