@@ -64,8 +64,9 @@ for _key, _base, _repo in (
         ("seed-coder-8b", "ByteDance-Seed/Seed-Coder-8B-Instruct", "dimsmauls/seed-coder-8b-code4ml-lora")):
     ARMS[_key] = dict(base=_base, adapter=None, seeds=[None], quant=False, shots=0)
     ARMS[f"{_key}-lora"] = dict(base=_base, adapter=_repo, seeds=[42], quant=False, shots=0)
-    for _model in (_key, f"{_key}-lora"):   # + 3 examples in the prompt
-        ARMS[f"{_model}-3shot"] = {**ARMS[_model], "shots": 3}
+    for _model in (_key, f"{_key}-lora"):   # + 1 or 3 examples in the prompt
+        for _shots in (1, 3):
+            ARMS[f"{_model}-{_shots}shot"] = {**ARMS[_model], "shots": _shots}
 
 
 def prefix(cfg):

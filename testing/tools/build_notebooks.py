@@ -487,13 +487,13 @@ MD_FT_INTRO = """
 Is the weak result specific to Qwen2.5-Coder-7B? DeepSeek-Coder-6.7B-Instruct and Seed-Coder-8B-Instruct get a LoRA
 adapter with exactly the hyperparameters of the Qwen LoRA arm (r 8, alpha 16, lr 2e-4, 3 epochs + early stopping,
 Code4ML `training` split), **one seed (42)**. Then DS-1000 pass@k (+ the Code4ML replies) for each model **without and
-with** the adapter, with 0 and 3 examples in the prompt (the same 3 examples as the thesis few-shot arm), the same
-evaluation as every thesis arm.
+with** the adapter, with 0, 1 and 3 examples in the prompt (the same examples as the thesis shot arms; 1 shot = the
+first of the 3), the same evaluation as every thesis arm.
 
 | Step | Output |
 |---|---|
 | `train_lora.py <model>` | adapter in `dimsmauls/<model>-code4ml-lora/seed-42/` (~15 min each on an A100) |
-| arms `<model>`, `<model>-lora`, `<model>-3shot`, `<model>-lora-3shot` for `deepseek-6.7b` and `seed-coder-8b` (8 runs) | `<arm>/...` in `output_repo` |
+| arms `<model>` and `<model>-lora`, each also `-1shot` / `-3shot`, for `deepseek-6.7b` and `seed-coder-8b` (12 runs) | `<arm>/...` in `output_repo` |
 
 Every run checks its first replies (raw Ġ/Ċ or empty = wrong tokenizer) and stops before the long DS-1000 track.
 
@@ -525,7 +525,7 @@ print("failed:", failed)
 def fine_tuning_notebook():
     helpers = {**HELPERS, "train_lora.py": (JUSTIFICATION / "fine-tuning" / "train_lora.py").read_text()}
     kinds = {f"{m}{s}" for m in ("deepseek-6.7b", "deepseek-6.7b-lora", "seed-coder-8b", "seed-coder-8b-lora")
-             for s in ("", "-3shot")}
+             for s in ("", "-1shot", "-3shot")}
     install = install_cell().replace("-U vllm ", f"-U {VLLM_PIN} ") + "\n%pip install -q peft accelerate"
     return notebook([
         md(MD_FT_INTRO), md("## 0. Configuration (edit here)"),
