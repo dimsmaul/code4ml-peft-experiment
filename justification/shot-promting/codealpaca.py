@@ -1,6 +1,6 @@
 """Justification POC 1: prompting shots on general programming. Qwen2.5-Coder-7B-Instruct without (vanilla) and with
-the LoRA adapter (seed 42) answers CodeAlpaca-20k instructions with 1 and 3 examples in the prompt; each answer is scored with ROUGE-L against the
-reference, as in Nguyen et al. (IJECE 2026).
+the LoRA adapter (seed 42) answers CodeAlpaca-20k instructions with 0, 1 and 3 examples in the prompt; each answer
+is scored with ROUGE-L against the reference, as in Nguyen et al. (IJECE 2026).
 
     python codealpaca.py config.yml qwen-7b
 
@@ -21,7 +21,7 @@ import yaml
 
 DATASET = "sahil2801/CodeAlpaca-20k"
 SPLIT_SEED = 42
-SHOTS = (1, 3)   # 1 shot = the first of the 3 examples
+SHOTS = (0, 1, 3)   # 1 shot = the first of the 3 examples
 MODELS = {   # base model, {variant: (adapter repo, folder) or None}
     "qwen-7b": ("Qwen/Qwen2.5-Coder-7B-Instruct", {
         "vanilla": None,   # baseline: the same base without the adapter
